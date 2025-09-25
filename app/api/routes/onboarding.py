@@ -23,14 +23,14 @@ def onboard_user(payload: OnboardingRequest) -> OnboardingResponse:
 
 @router.post("/chat", response_model=ChatResponse, summary="Onboarding chat message")
 def onboarding_chat(payload: ChatRequest) -> ChatResponse:
-    reply = generate_onboarding_reply(
+    reply, profile = generate_onboarding_reply(
         user_id=payload.user_id,
         session_id=payload.session_id,
         user_input=payload.message,
         model=payload.model,
     )
     history = get_history(payload.user_id, payload.session_id)
-    return ChatResponse(reply=reply, history=history)
+    return ChatResponse(reply=reply, history=history, profile=profile)
 
 
 

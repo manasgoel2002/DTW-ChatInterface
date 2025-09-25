@@ -17,6 +17,16 @@ uvicorn main:app --reload
 
 Open docs at `http://127.0.0.1:8000/docs`.
 
+### Streamlit UI
+
+Run the simple web UI (ensure the FastAPI server is running):
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Configure the API base URL in the sidebar if your server isn't on `http://127.0.0.1:8000`.
+
 ### Endpoints
 
 - POST `/api/onboarding/`

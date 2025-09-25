@@ -1,4 +1,5 @@
 from datetime import time, date
+from typing import Any
 
 from pydantic import BaseModel, EmailStr
 
@@ -47,6 +48,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     history: list[dict[str, str]]
+    profile: dict[str, Any] | None = None
 
 
 
