@@ -51,6 +51,26 @@ def onboarding_section() -> None:
         st.session_state.user_id = data.get("user_id", "")
         st.success(data.get("message", "Onboarded"))
 
+        # Auto-start onboarding by requesting the first question
+        if st.session_state.user_id:
+            try:
+                start_payload = {
+                    "user_id": st.session_state.user_id,
+                    "session_id": st.session_state.session_id,
+                    "message": "start",
+                    "model": st.session_state.get("model", "gpt-4o-mini"),
+                }
+                start_data = api_post("/api/onboarding/chat", start_payload)
+                reply = start_data.get("reply", "")
+                history: List[Dict[str, str]] = start_data.get("history", [])
+                profile: Dict[str, Any] = start_data.get("profile", {})
+                st.session_state.history = history
+                st.session_state.profile = profile
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
+            except Exception as e:
+                st.warning(f"Couldn't auto-start onboarding: {e}")
+
     if st.session_state.user_id:
         st.info(f"User ID: {st.session_state.user_id}")
 

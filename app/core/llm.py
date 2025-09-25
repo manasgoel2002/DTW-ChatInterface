@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Set
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -13,6 +13,7 @@ from app.api.schemas.onboarding import UserProfile
 
 _history_store: Dict[Tuple[str, str], List[Dict[str, str]]] = {}
 _profile_store: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_skipped_store: Dict[Tuple[str, str], Set[str]] = {}
 
 
 def initialize_env() -> None:
@@ -28,39 +29,74 @@ def _get_profile(user_id: str, session_id: str) -> Dict[str, Any]:
     return _profile_store.setdefault((user_id, session_id), {})
 
 
-def _build_system_prompt() -> str:
+def _get_skipped(user_id: str, session_id: str) -> Set[str]:
+    return _skipped_store.setdefault((user_id, session_id), set())
+
+
+def _ordered_profile_fields() -> List[str]:
+    """Return UserProfile fields in declared order (Pydantic v2)."""
+    return list(UserProfile.model_fields.keys())
+
+
+def _field_hints() -> Dict[str, str]:
+    """Human-friendly hints/examples for each field."""
+    return {
+        "age": "Age in years (e.g., 34)",
+        "date_of_birth": "Date of birth in YYYY-MM-DD (e.g., 1991-07-14)",
+        "gender_or_sex": "Gender or sex (free text)",
+        "height_cm": "Height in centimeters (e.g., 178)",
+        "weight_kg": "Weight in kilograms (e.g., 72.5)",
+        "sleep_bedtime": "Usual bedtime in HH:MM 24h (e.g., 22:30)",
+        "sleep_wake_time": "Usual wake time in HH:MM 24h (e.g., 06:45)",
+        "workout_type": "Primary workout type (e.g., running, weights, yoga)",
+        "workout_days_per_week": "Workout days per week (0-7)",
+        "physical_activity_profile": "Work/activity style (seated, on-feet, manual labor)",
+        "substance_alcohol_per_week": "Alcohol drinks per week as a number (e.g., 3)",
+        "substance_tobacco_per_day": "Tobacco units per day (e.g., 0, 2)",
+        "substance_caffeine_mg_per_day": "Caffeine mg per day (e.g., 150)",
+        "coping_strategies": "Coping strategies you use (e.g., mindfulness, journaling)",
+        "preferred_checkin_time": "Preferred check-in time HH:MM 24h (e.g., 09:00)",
+        "notification_style": "Notification style (push, SMS, email)",
+        "married_status": "Marital status (optional)",
+        "social_support": "Do you have social support? (yes/no)",
+        "target_sleep_hours": "Target hours of sleep per night (e.g., 7.5)",
+        "voice_or_chat_preference": "Do you prefer voice or chat?",
+    }
+
+
+def _missing_fields(profile: Dict[str, Any], skipped: Set[str]) -> List[str]:
+    return [f for f in _ordered_profile_fields() if f not in profile and f not in skipped]
+
+
+def _build_system_prompt(profile: Dict[str, Any], skipped: Set[str]) -> str:
     now = datetime.now(timezone.utc).astimezone()
     now_str = now.strftime("%A, %B %d, %Y %I:%M %p %Z")
+    hints = _field_hints()
+    missing = _missing_fields(profile, skipped)
+    next_field = missing[0] if missing else None
+
+    checklist_lines = [f"- {name}: {hints.get(name, '')}".rstrip() for name in _ordered_profile_fields()]
+    checklist = "\n".join(checklist_lines)
+
+    next_instr = (
+        f"NEXT_FIELD — {next_field}: {hints.get(next_field, '')}\n"
+        "Ask EXACTLY ONE short question to collect this field now."
+        if next_field
+        else "All fields collected or skipped. Offer a brief summary and confirmation."
+    )
+
     return (
-        "You are a very friendly Digital Twin onboarding assistant. Be concise, warm, and supportive.\n"
+        "You are a friendly Digital Twin onboarding agent. Be concise, warm, and supportive.\n"
         f"Current date and time: {now_str}.\n\n"
-        "GOAL — Collect ONLY the information the user explicitly provides and keep it in session memory.\n"
+        "GOAL — Collect ONLY what the user explicitly provides and keep it in session memory.\n"
         "Never infer or fabricate. If unsure, ask a short clarifying question. Accept 'skip' or 'unknown'.\n\n"
-        "CHECKLIST — Gather these fields (one topic at a time):\n"
-        "- Age; date of birth; gender or sex\n"
-        "- Height (cm) and weight (kg)\n"
-        "- Usual sleep schedule: bedtime, wake time\n"
-        "- Workout type and days per week\n"
-        "- Physical activity profile (e.g., mostly seated, on-feet, manual labor)\n"
-        "- Baseline substances: alcohol (drinks/week), tobacco (units/day), caffeine (mg/day)\n"
-        "- Coping strategies (e.g., mindfulness, journaling, socializing)\n"
-        "- Preferred check-in time and notification style (e.g., push, SMS, email)\n"
-        "- Married status (optional)\n"
-        "- Social support (yes or no)\n"
-        "- Target sleep hours\n"
-        "FLOW — Progressive interviewing:\n"
-        "1) Start with: 'Tell me about your routine for sleep, work, and movement.'\n"
-        "2) Then ask: 'What do you enjoy or avoid in workouts?'\n"
-        "3) If they want, invite: 'If you want, share diagnoses or medicines and I will summarize.'\n"
-        "4) Clarify substances into simple numbers: alcohol/week, tobacco/day, caffeine mg/day.\n"
-        "5) Ask: 'Who do you turn to for support?'\n"
-        "6) Gather preferred check-in time and notification style; note voice vs chat preference.\n"
-        "7) Ask remaining checklist fields not yet covered.\n\n"
-        "STYLE — Keep to at most two concise questions per turn. Use plain language and examples.\n"
-        "Specify units when helpful (cm, kg, mg/day, bedtime like 22:30).\n"
-        "Respect privacy: treat medical details as optional; only store with explicit user consent.\n\n"
-        "SUMMARY — When done, read back a short bullet summary of the collected fields and values.\n"
-        "Ask: 'Does this look right? I can save it now.' Do not save until the user confirms."
+        "CHECKLIST — Ask for these Pydantic fields one by one in order (exactly one field per turn):\n"
+        f"{checklist}\n\n"
+        f"{next_instr}\n\n"
+        "STYLE — One concise question per turn. Specify units and formats when helpful (cm, kg, mg/day, HH:MM 24h, YYYY-MM-DD).\n"
+        "If the user provides multiple fields, acknowledge and capture them, but next question must continue to the next missing field.\n"
+        "Respect privacy; medical details are optional and only captured with explicit consent.\n\n"
+        "COMPLETION — When no fields remain, read back a short bullet summary of collected values and ask for confirmation: 'Does this look right? I can save it now.'"
     )
 
 
@@ -132,8 +168,19 @@ def generate_onboarding_reply(
 ) -> tuple[str, Dict[str, Any]]:
     history = _get_history(user_id, session_id)
     profile = _get_profile(user_id, session_id)
+    skipped = _get_skipped(user_id, session_id)
 
-    system_prompt = _build_system_prompt()
+    # Determine the field we were targeting before processing this input
+    current_missing_before = _missing_fields(profile, skipped)
+    targeted_field = current_missing_before[0] if current_missing_before else None
+
+    # Handle explicit skip/unknown for the targeted field
+    if targeted_field:
+        normalized = user_input.strip().lower()
+        if normalized in {"skip", "unknown", "na", "n/a"}:
+            skipped.add(targeted_field)
+
+    system_prompt = _build_system_prompt(profile, skipped)
     # Build OpenAI chat-completions style messages
     oa_messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
     for msg in history:
