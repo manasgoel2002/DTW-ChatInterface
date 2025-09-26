@@ -99,10 +99,22 @@ def chat_section() -> None:
     # Live profile panel
     with col_profile:
         st.subheader("Live Profile")
-        if st.session_state.profile is None:
+        prof = st.session_state.profile
+        if prof is None:
             st.caption("No data collected yet.")
         else:
-            st.json(st.session_state.profile)
+            filled = sum(1 for v in prof.values() if v is not None)
+            total = len(prof)
+            st.progress(filled / total if total else 0.0, text=f"{filled}/{total} fields")
+            # Styled key-value list
+            st.markdown('<div class="panel">', unsafe_allow_html=True)
+            for k, v in prof.items():
+                if v is None:
+                    val_html = '<span class="null">NULL</span>'
+                else:
+                    val_html = f'<span class="val">{v}</span>'
+                st.markdown(f'<div><span class="key">{k}</span>: {val_html}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
     with col_chat:
         user_msg = st.chat_input("Message the assistant...")
@@ -149,6 +161,35 @@ def checkin_section() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="DTW Chat Interface", page_icon="💬", layout="wide")
+    # Fixed Light theme palette
+    p = {
+        "app": "#ffffff",
+        "text": "#0f172a",
+        "card": "#f8fafc",
+        "sidebar": "#f1f5f9",
+        "border": "#e2e8f0",
+        "accent": "#2563eb",
+        "muted": "#64748b",
+    }
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{ background-color: {p['app']}; color: {p['text']}; }}
+        section[data-testid="stSidebar"] {{ background-color: {p['sidebar']}; }}
+        h1, h2, h3 {{ color: {p['text']}; }}
+        .stMarkdown p {{ line-height: 1.5; }}
+        div[data-testid="stChatMessage"] {{ background: {p['card']}; border: 1px solid {p['border']}; }}
+        div[role="status"] {{ background: {p['sidebar']}; }}
+        .badge {{ display:inline-block; padding:2px 8px; border-radius:12px; font-size:12px; margin-left:6px; background:{p['border']}; color:{p['text']}; }}
+        .panel {{ background:{p['sidebar']}; border:1px solid {p['border']}; border-radius:8px; padding:12px; }}
+        .key {{ color:{p['accent']}; }}
+        .val {{ color:{p['text']}; }}
+        .null {{ color:{p['muted']}; font-style:italic; }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     ensure_session_state()
     sidebar_controls()
     st.title("DTW Chat Interface")
