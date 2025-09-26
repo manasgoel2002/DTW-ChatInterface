@@ -10,7 +10,8 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def api_post(path: str, json: Dict[str, Any]) -> Dict[str, Any]:
-    url = f"{API_BASE_URL}{path}"
+    base_url = st.session_state.get("api_base_url", API_BASE_URL)
+    url = f"{base_url}{path}"
     resp = requests.post(url, json=json, timeout=60)
     resp.raise_for_status()
     return resp.json()
@@ -24,7 +25,9 @@ def ensure_session_state() -> None:
     if "history" not in st.session_state:
         st.session_state.history = []
     if "profile" not in st.session_state:
-        st.session_state.profile = {}
+        st.session_state.profile = None
+    if "api_base_url" not in st.session_state:
+        st.session_state.api_base_url = API_BASE_URL
 
 
 def sidebar_controls() -> None:
@@ -34,7 +37,8 @@ def sidebar_controls() -> None:
     if st.sidebar.button("Reset Session"):
         st.session_state.history = []
         st.session_state.session_id = f"web-{uuid.uuid4()}"
-        st.session_state.profile = {}
+        st.session_state.profile = None
+        st.session_state.user_id = ""
 
 
 def onboarding_section() -> None:
@@ -63,11 +67,12 @@ def onboarding_section() -> None:
                 start_data = api_post("/api/onboarding/chat", start_payload)
                 reply = start_data.get("reply", "")
                 history: List[Dict[str, str]] = start_data.get("history", [])
-                profile: Dict[str, Any] = start_data.get("profile", {})
+                profile: Dict[str, Any] = start_data.get("profile", None)
                 st.session_state.history = history
                 st.session_state.profile = profile
                 with st.chat_message("assistant"):
                     st.markdown(reply)
+                st.rerun()
             except Exception as e:
                 st.warning(f"Couldn't auto-start onboarding: {e}")
 
@@ -76,46 +81,55 @@ def onboarding_section() -> None:
 
 
 def chat_section() -> None:
-    st.subheader("Onboarding Chat")
+    col_chat, col_profile = st.columns([2, 1])
+    with col_chat:
+        st.subheader("Onboarding Chat")
     if not st.session_state.user_id:
         st.warning("Create a user first in the Onboarding section.")
         return
 
-    # Show history and current profile
-    for turn in st.session_state.history:
-        role = turn.get("role", "user")
-        content = turn.get("content", "")
-        with st.chat_message(role):
-            st.markdown(content)
+    # Show history
+    with col_chat:
+        for turn in st.session_state.history:
+            role = turn.get("role", "user")
+            content = turn.get("content", "")
+            with st.chat_message(role):
+                st.markdown(content)
 
-    if st.session_state.profile:
-        with st.expander("Current Profile", expanded=True):
+    # Live profile panel
+    with col_profile:
+        st.subheader("Live Profile")
+        if st.session_state.profile is None:
+            st.caption("No data collected yet.")
+        else:
             st.json(st.session_state.profile)
 
-    user_msg = st.chat_input("Message the assistant...")
-    if user_msg:
-        with st.chat_message("user"):
-            st.markdown(user_msg)
-        st.session_state.history.append({"role": "user", "content": user_msg})
+    with col_chat:
+        user_msg = st.chat_input("Message the assistant...")
+        if user_msg:
+            with st.chat_message("user"):
+                st.markdown(user_msg)
+            st.session_state.history.append({"role": "user", "content": user_msg})
 
-        payload = {
-            "user_id": st.session_state.user_id,
-            "session_id": st.session_state.session_id,
-            "message": user_msg,
-            "model": st.session_state.get("model", "gpt-4o-mini"),
-        }
-        try:
-            data = api_post("/api/onboarding/chat", payload)
-            reply = data.get("reply", "")
-            history: List[Dict[str, str]] = data.get("history", [])
-            profile: Dict[str, Any] = data.get("profile", {})
-            # Trust server history to keep in sync
-            st.session_state.history = history
-            st.session_state.profile = profile
-            with st.chat_message("assistant"):
-                st.markdown(reply)
-        except Exception as e:
-            st.error(f"Chat error: {e}")
+            payload = {
+                "user_id": st.session_state.user_id,
+                "session_id": st.session_state.session_id,
+                "message": user_msg,
+                "model": st.session_state.get("model", "gpt-4o-mini"),
+            }
+            try:
+                data = api_post("/api/onboarding/chat", payload)
+                reply = data.get("reply", "")
+                history: List[Dict[str, str]] = data.get("history", [])
+                profile: Dict[str, Any] = data.get("profile", None)
+                # Trust server history to keep in sync
+                st.session_state.history = history
+                st.session_state.profile = profile
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Chat error: {e}")
 
 
 def checkin_section() -> None:
@@ -134,7 +148,7 @@ def checkin_section() -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="DTW Chat Interface", page_icon="💬", layout="centered")
+    st.set_page_config(page_title="DTW Chat Interface", page_icon="💬", layout="wide")
     ensure_session_state()
     sidebar_controls()
     st.title("DTW Chat Interface")
